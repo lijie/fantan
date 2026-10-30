@@ -1,0 +1,245 @@
+<!DOCTYPE html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>反弹坦克</title><style>
+*{box-sizing:border-box;margin:0;padding:0}html,body{height:100%;background:#2b2a33;color:#333;font-family:"PingFang SC","Microsoft YaHei",sans-serif;overflow:hidden;touch-action:none;user-select:none;-webkit-user-select:none}
+#wrap{display:flex;flex-direction:column;align-items:center;height:100%;padding:6px}
+#hud{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;justify-content:center;color:#f3ead7;font-size:14px;padding:4px 8px;width:100%;max-width:960px}
+#hud b{color:#ffd65a}.hp{display:inline-block;width:12px;height:12px;border-radius:3px;background:#e44;margin-right:2px;vertical-align:-1px}.hp.off{background:#555}
+#weps{display:flex;gap:4px}#weps button{font:inherit;font-size:12px;padding:3px 7px;border-radius:6px;border:1px solid #777;background:#3a3946;color:#ddd;cursor:pointer}
+#weps button.on{background:#ffd65a;color:#222;border-color:#ffd65a}#weps button.cd{opacity:.5}
+#stage{position:relative;flex:0 0 auto}canvas{display:block;border-radius:8px;box-shadow:0 6px 20px #0008;cursor:crosshair}
+.ov{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#1c1b22d0;color:#fff;text-align:center;border-radius:8px;padding:16px;gap:10px}
+.ov h1{font-size:44px;color:#ffd65a;text-shadow:0 3px 0 #a33}.ov p{font-size:15px;line-height:1.6;max-width:560px;color:#eee}
+.ov button{font:inherit;font-size:18px;padding:10px 28px;border-radius:10px;border:0;background:#ffd65a;color:#222;cursor:pointer;box-shadow:0 4px 0 #b8902a}
+.hide{display:none!important}#tip{position:absolute;left:50%;top:8px;transform:translateX(-50%);background:#000a;color:#fff;font-size:13px;padding:4px 12px;border-radius:12px;pointer-events:none;white-space:nowrap;max-width:96%;overflow:hidden;text-overflow:ellipsis}
+#touch{display:none;width:100%;justify-content:space-between;align-items:center;padding:10px 16px;flex:1;max-height:260px}
+#joy{width:130px;height:130px;border-radius:50%;background:#ffffff18;border:2px solid #ffffff40;position:relative}#knob{position:absolute;width:56px;height:56px;border-radius:50%;background:#ffd65acc;left:37px;top:37px}
+#tbtns{display:flex;flex-direction:column;gap:10px}#tbtns button{font:inherit;font-size:16px;width:96px;height:52px;border-radius:12px;border:0;background:#4a4958;color:#fff}
+#tbtns #tFire{background:#d9534f}.touchon #touch{display:flex}
+@media (max-width:700px){#tip{white-space:normal;font-size:11px;top:4px;width:94%;text-align:center}.ov h1{font-size:30px}.ov p{font-size:12px}.ov button{font-size:15px;padding:8px 20px}#hud{font-size:12px}}
+</style></head><body><div id="wrap">
+<div id="hud"><span>关卡 <b id="hLv">1</b>/4</span><span>血量 <span id="hHp"></span></span><span>敌人 <b id="hEn">0</b></span><span>地雷 <b id="hMn">3</b></span><div id="weps"></div></div>
+<div id="stage"><canvas id="c" width="960" height="640"></canvas><div id="tip"></div>
+<div class="ov" id="ovStart"><h1>反弹坦克</h1><p>桌面上的玩具坦克大战！子弹会在积木墙上反弹，算好角度打出“擦边球”绕过掩体。<br>移动：WASD / 方向键　瞄准：鼠标　开火：左键　地雷：空格　武器：1-4<br>地雷能炸掉纸箱，红色油桶一碰就炸，躲进灌木敌人就看不见你。</p><button id="bStart">开始游戏</button></div>
+<div class="ov hide" id="ovRes"><h1 id="rT">胜利</h1><p id="rP"></p><button id="bNext">下一关</button><button id="bRetry">重新开始</button></div>
+</div>
+<div id="touch"><div id="joy"><div id="knob"></div></div><div id="tbtns"><button id="tFire">开火</button><button id="tMine">地雷</button><button id="tWep">换武器</button></div></div>
+</div><script>
+"use strict";
+const cv=document.getElementById('c'),X=cv.getContext('2d'),W=960,H=640,T=40,CW=24,CH=16;
+const $=id=>document.getElementById(id);
+// ---------- audio
+let AC=null;function snd(f,d,type,vol,slide){try{if(!AC)AC=new(window.AudioContext||window.webkitAudioContext)();const o=AC.createOscillator(),g=AC.createGain();o.type=type||'square';o.frequency.value=f;if(slide)o.frequency.exponentialRampToValueAtTime(slide,AC.currentTime+d);g.gain.value=vol||.05;g.gain.exponentialRampToValueAtTime(.0001,AC.currentTime+d);o.connect(g);g.connect(AC.destination);o.start();o.stop(AC.currentTime+d)}catch(e){}}
+function boom(){try{if(!AC)return;const n=AC.sampleRate*.4,b=AC.createBuffer(1,n,AC.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,2);const s=AC.createBufferSource(),g=AC.createGain();g.gain.value=.25;s.buffer=b;s.connect(g);g.connect(AC.destination);s.start()}catch(e){}}
+// ---------- levels: # 墙 B 纸箱 O 油桶 G 灌木 M 泥地 H 修理包 P 玩家 E 普通 R 反弹高手 S 布雷工兵 I 隐形 T 重装
+const LEVELS=[
+{name:'教学：擦边球',tip:'敌人躲在墙后：瞄准墙面，看虚线预览，让子弹反弹过去！',map:[
+"########################",
+"#......................#",
+"#......................#",
+"#..............#.......#",
+"#..............#...E...#",
+"#..............#.......#",
+"#.....#####....#.......#",
+"#..............#.......#",
+"#..P...........#.......#",
+"#..............#.......#",
+"#..............#########",
+"#......................#",
+"#.........H............#",
+"#......................#",
+"#......................#",
+"########################"]},
+{name:'纸箱与油桶',tip:'空格放地雷可炸开纸箱；射击红色油桶能炸伤附近敌人。',map:[
+"########################",
+"#......................#",
+"#..P.......#......E....#",
+"#..........#...........#",
+"#..........#....O......#",
+"#....###...B...........#",
+"#..........B.....###...#",
+"#..........#...........#",
+"#..........#......R....#",
+"#...H......#...........#",
+"#......O...#...........#",
+"#..........BB..........#",
+"#......................#",
+"#......####.......O....#",
+"#......................#",
+"########################"]},
+{name:'灌木与泥地',tip:'躲进灌木敌人就看不到你；泥地会减速。小心工兵埋的雷和若隐若现的隐形坦克。',map:[
+"########################",
+"#GGG...................#",
+"#GPG.....MMMM......S...#",
+"#GGG.....MMMM..........#",
+"#........MMMM...####...#",
+"#....##................#",
+"#....##.....O.....GG...#",
+"#...........B.....GG.I.#",
+"#.......#####..........#",
+"#..............MMM.....#",
+"#..H......GG...MMM..E..#",
+"#.........GG...........#",
+"#....O.......#.........#",
+"#............#.....B...#",
+"#............#.........#",
+"########################"]},
+{name:'总决战',tip:'重装坦克血厚，试试 4 号火箭炮；全部武器自由搭配！',map:[
+"########################",
+"#..P.....#.......T.....#",
+"#........#.............#",
+"#..GG....B....####.....#",
+"#..GG....#.........R...#",
+"#........#..O..........#",
+"#....MMM.....###...S...#",
+"#....MMM..........GG...#",
+"#..H......#.......GG...#",
+"#.........#..I.........#",
+"#..####...B.......O....#",
+"#.........#....MM......#",
+"#..O......#....MM...E..#",
+"#.......H.#............#",
+"#.........#........H...#",
+"########################"]}];
+const ETYPE={E:{n:'普通',hp:1,sp:55,cd:2.4,col:'#c0392b',bounce:0},R:{n:'反弹高手',hp:1,sp:50,cd:2.2,col:'#8e44ad',bounce:1},S:{n:'布雷工兵',hp:2,sp:70,cd:3,col:'#d35400',bounce:0},I:{n:'隐形',hp:2,sp:60,cd:2.6,col:'#16a085',bounce:0},T:{n:'重装',hp:6,sp:35,cd:2,col:'#34495e',bounce:1}};
+const WEPS=[{n:'标准',k:'std',cd:.28,ammo:Infinity,sp:340,b:2,dmg:1,r:4},{n:'追踪',k:'seek',cd:.5,ammo:10,sp:260,b:1,dmg:1,r:4},{n:'布雷弹',k:'bomb',cd:.9,ammo:6,sp:220,b:3,dmg:2,r:6},{n:'火箭',k:'rocket',cd:1.2,ammo:5,sp:200,b:1,dmg:3,r:6}];
+// ---------- state
+let G={},grid,lv=0,mode='menu',keys={},mouse={x:600,y:300,down:false},shake=0,flash=0,tipT=0,lastT=0,deco=[];
+function solidCode(c){return c==='#'||c==='B'||c==='O'}
+function tileAt(x,y){const i=Math.floor(x/T),j=Math.floor(y/T);if(i<0||j<0||i>=CW||j>=CH)return '#';return grid[j][i]}
+function solidAt(x,y){return solidCode(tileAt(x,y))}
+function circleHits(x,y,r){for(let j=Math.floor((y-r)/T);j<=Math.floor((y+r)/T);j++)for(let i=Math.floor((x-r)/T);i<=Math.floor((x+r)/T);i++){if(i<0||j<0||i>=CW||j>=CH)return true;if(!solidCode(grid[j][i]))continue;const cx=Math.max(i*T,Math.min(x,i*T+T)),cy=Math.max(j*T,Math.min(y,j*T+T));if((cx-x)**2+(cy-y)**2<r*r)return true}return false}
+function mkTank(x,y,type){const e=type?ETYPE[type]:null;return{x,y,a:0,ta:0,r:15,hp:e?e.hp:5,max:e?e.hp:5,type:type||'P',cd:e?1+Math.random()*1.5:0,dir:Math.random()*6.28,turn:1,mineT:2,hit:0,trackD:0,alpha:1,ph:Math.random()*6}}
+function load(n){lv=n;const L=LEVELS[n];grid=L.map.map((r,j)=>{let a=(r+'.'.repeat(CW)).slice(0,CW).split('');if(j===0||j===CH-1)a=a.map(()=>'#');a[0]='#';a[CW-1]='#';return a});
+G={player:null,enemies:[],bullets:[],mines:[],parts:[],tracks:[],packs:[],booms:[],mineCount:3,wep:0,ammo:WEPS.map(w=>w.ammo),wcd:0,endT:-1,time:0,stats:{shots:0,bounces:0,kills:0}};
+for(let j=0;j<CH;j++)for(let i=0;i<CW;i++){const c=grid[j][i],x=i*T+T/2,y=j*T+T/2;if(c==='P'){G.player=mkTank(x,y);grid[j][i]='.'}else if(ETYPE[c]){G.enemies.push(mkTank(x,y,c));grid[j][i]='.'}else if(c==='H'){G.packs.push({x,y});grid[j][i]='.'}}
+deco=[];for(let k=0;k<14;k++)deco.push({x:Math.random()*W,y:Math.random()*H,r:6+Math.random()*16,a:Math.random()*6});
+showTip(L.tip,7);hud();}
+function showTip(s,t){$('tip').textContent=s;$('tip').classList.remove('hide');tipT=t}
+// ---------- path trace (used by preview & AI)
+function trace(x,y,a,maxB,len,target,tr){let vx=Math.cos(a),vy=Math.sin(a),pts=[[x,y]],b=0,st=4;for(let d=0;d<len;d+=st){let nx=x+vx*st,ny=y+vy*st;if(solidAt(nx,y)){vx=-vx;b++;pts.push([x,y]);if(b>maxB)return{pts,hit:false};nx=x+vx*st}if(solidAt(nx,ny)){vy=-vy;b++;pts.push([x,y]);if(b>maxB)return{pts,hit:false};ny=y+vy*st}x=nx;y=ny;if(target&&(x-target.x)**2+(y-target.y)**2<(tr||16)**2){pts.push([x,y]);return{pts,hit:true,b}}if(target&&G.enemies){for(const e of G.enemies)if(e!==target&&e!==G.shooter&&(x-e.x)**2+(y-e.y)**2<200)return{pts,hit:false}}}pts.push([x,y]);return{pts,hit:false}}
+// ---------- actions
+function fire(t,a,wi){const w=WEPS[wi];const x=t.x+Math.cos(a)*22,y=t.y+Math.sin(a)*22;if(solidAt(x,y))return false;
+G.bullets.push({x,y,vx:Math.cos(a)*w.sp*(t.type==='P'?1:.72),vy:Math.sin(a)*w.sp*(t.type==='P'?1:.72),k:w.k,b:0,maxB:t.type==='P'?w.b:ETYPE[t.type].bounce+1,dmg:w.dmg,r:w.r,own:t.type==='P'?'p':'e',life:w.k==='bomb'?1.6:6,trail:[],safe:.15});
+snd(t.type==='P'?520:300,.08,'square',.04,120);for(let i=0;i<5;i++)G.parts.push({x,y,vx:Math.cos(a)*80+(Math.random()-.5)*60,vy:Math.sin(a)*80+(Math.random()-.5)*60,l:.25,m:.25,c:'#ffdd88',s:3});return true}
+function playerFire(){const p=G.player;if(!p||mode!=='play'||G.wcd>0)return;const w=WEPS[G.wep];if(G.ammo[G.wep]<=0){showTip(w.n+'弹药用完了，按 1 切回标准炮',2);G.wep=0;hud();return}
+if(fire(p,p.ta,G.wep)){G.wcd=w.cd;G.ammo[G.wep]--;G.stats.shots++;hud()}}
+function dropMine(t,own){G.mines.push({x:t.x,y:t.y,own,arm:.8,fuse:own==='p'?4:Infinity,ph:0})}
+function playerMine(){if(mode!=='play'||!G.player||G.mineCount<=0)return;if(G.mines.some(m=>(m.x-G.player.x)**2+(m.y-G.player.y)**2<400))return;G.mineCount--;dropMine(G.player,'p');snd(200,.1,'triangle',.06);hud()}
+function explode(x,y,R,dmg){boom();shake=Math.max(shake,R/7);flash=.25;G.booms.push({x,y,R,t:0});
+for(let i=0;i<34;i++){const a=Math.random()*6.28,s=40+Math.random()*220;G.parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:.5+Math.random()*.5,m:1,c:['#ffcc33','#ff7a1a','#e8452c','#666'][i%4],s:3+Math.random()*4})}
+const chain=[];for(let j=Math.floor((y-R)/T);j<=Math.floor((y+R)/T);j++)for(let i=Math.floor((x-R)/T);i<=Math.floor((x+R)/T);i++){if(i<1||j<1||i>=CW-1||j>=CH-1)continue;const c=grid[j][i],cx=i*T+T/2,cy=j*T+T/2;if(Math.hypot(cx-x,cy-y)>R+14)continue;if(c==='B'){grid[j][i]='.';debris(cx,cy,'#c89b5c')}else if(c==='O'){grid[j][i]='.';chain.push([cx,cy])}}
+for(const t of [G.player,...G.enemies])if(t&&Math.hypot(t.x-x,t.y-y)<R+t.r)damage(t,dmg);
+for(const m of G.mines)if(!m.dead&&Math.hypot(m.x-x,m.y-y)<R){m.dead=1;chain.push([m.x,m.y,1])}
+setTimeout(()=>{for(const c of chain)explode(c[0],c[1],c[2]?62:80,2)},90)}
+function debris(x,y,c){for(let i=0;i<14;i++){const a=Math.random()*6.28,s=60+Math.random()*120;G.parts.push({x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,l:.7,m:.7,c,s:4+Math.random()*4,sq:1})}}
+function damage(t,d){if(t.hp<=0)return;t.hp-=d;t.hit=.15;snd(150,.12,'sawtooth',.05);if(t.hp<=0){if(t.type!=='P'){G.stats.kills++}explode(t.x,t.y,46,0);debris(t.x,t.y,t.type==='P'?'#3d7a3d':ETYPE[t.type].col)}hud()}
+// ---------- update
+function moveTank(t,dx,dy,sp,dt){const m=tileAt(t.x,t.y)==='M'?.45:1;const nx=t.x+dx*sp*m*dt,ny=t.y+dy*sp*m*dt;let moved=false;if(!circleHits(nx,t.y,t.r-1)&&!tankBlock(t,nx,t.y)){t.x=nx;moved=true}if(!circleHits(t.x,ny,t.r-1)&&!tankBlock(t,t.x,ny)){t.y=ny;moved=true}
+if(moved&&(dx||dy)){const ta=Math.atan2(dy,dx);let d=ta-t.a;while(d>Math.PI)d-=6.283;while(d<-Math.PI)d+=6.283;t.a+=d*Math.min(1,dt*10);t.trackD+=sp*m*dt;if(t.trackD>9){t.trackD=0;G.tracks.push({x:t.x,y:t.y,a:t.a,l:6});if(G.tracks.length>500)G.tracks.shift()}}return moved}
+function tankBlock(t,x,y){for(const o of [G.player,...G.enemies])if(o&&o!==t&&o.hp>0&&(o.x-x)**2+(o.y-y)**2<(o.r+t.r)**2)return true;return false}
+function hidden(p){return tileAt(p.x,p.y)==='G'}
+function update(dt){G.time+=dt;if(tipT>0){tipT-=dt;if(tipT<=0)$('tip').classList.add('hide')}
+const p=G.player;
+if(p&&p.hp>0){let dx=0,dy=0;if(keys.KeyA||keys.ArrowLeft)dx--;if(keys.KeyD||keys.ArrowRight)dx++;if(keys.KeyW||keys.ArrowUp)dy--;if(keys.KeyS||keys.ArrowDown)dy++;if(joy.on){dx=joy.x;dy=joy.y}const l=Math.hypot(dx,dy);if(l>1){dx/=l;dy/=l}if(l>.1)moveTank(p,dx,dy,150,dt);
+p.ta=Math.atan2(mouse.y-p.y,mouse.x-p.x);if(G.wcd>0)G.wcd-=dt;if(mouse.down)playerFire();
+for(const k of G.packs)if(!k.used&&Math.hypot(k.x-p.x,k.y-p.y)<26&&p.hp<p.max){k.used=1;p.hp=Math.min(p.max,p.hp+2);snd(660,.2,'sine',.08,990);showTip('修理包：血量 +2',1.5);hud()}}
+const vis=p&&p.hp>0&&!hidden(p);
+for(const e of G.enemies){if(e.hp<=0)continue;const E=ETYPE[e.type];e.ph+=dt;
+const dP=p?Math.hypot(p.x-e.x,p.y-e.y):999;const sees=p&&p.hp>0&&(vis||dP<70);
+e.turn-=dt;if(e.turn<=0){e.turn=1+Math.random()*2;e.dir=sees&&Math.random()<.5?Math.atan2(p.y-e.y,p.x-e.x)+(Math.random()-.5)*1.5:Math.random()*6.28}
+if(e.type==='T'||dP>120||Math.random()<.5){if(!moveTank(e,Math.cos(e.dir),Math.sin(e.dir),E.sp,dt))e.turn=0}
+if(e.type==='I')e.alpha=.08+.92*Math.max(0,Math.sin(e.ph*1.3))**2;
+if(e.type==='S'){e.mineT-=dt;if(e.mineT<=0){e.mineT=3.5;if(G.mines.filter(m=>m.own==='e'&&!m.dead).length<4)dropMine(e,'e')}}
+if(sees){const want=Math.atan2(p.y-e.y,p.x-e.x);e.cd-=dt;
+if(e.cd<=0){e.cd=E.cd*(.8+Math.random()*.4);G.shooter=e;let shot=null;const tr=trace(e.x,e.y,want,0,900,p,18);if(tr.hit)shot=want;else if(E.bounce){let best=null;for(let k=0;k<120;k++){const a=k/120*6.283;const r=trace(e.x,e.y,a,E.bounce,900,p,20);if(r.hit){best=a;break}}shot=best}
+if(shot!==null){e.ta=shot+(Math.random()-.5)*.08;if(e.type==='I')e.alpha=1;fire(e,e.ta,e.type==='T'?3:0)}else{e.ta=want;e.cd=.6}}else{let d=want-e.ta;while(d>Math.PI)d-=6.283;while(d<-Math.PI)d+=6.283;e.ta+=d*Math.min(1,dt*3)}}else e.ta+=dt*.6}
+// bullets
+for(const b of G.bullets){if(b.dead)continue;b.life-=dt;b.safe-=dt;b.trail.push([b.x,b.y]);if(b.trail.length>14)b.trail.shift();
+if(b.k==='seek'){let best=null,bd=1e9;for(const e of G.enemies)if(e.hp>0){const d=Math.hypot(e.x-b.x,e.y-b.y);if(d<bd){bd=d;best=e}}if(best&&bd<320){const sp=Math.hypot(b.vx,b.vy),a=Math.atan2(b.vy,b.vx),wa=Math.atan2(best.y-b.y,best.x-b.x);let d=wa-a;while(d>Math.PI)d-=6.283;while(d<-Math.PI)d+=6.283;const na=a+Math.max(-2.2*dt,Math.min(2.2*dt,d));b.vx=Math.cos(na)*sp;b.vy=Math.sin(na)*sp}}
+if(b.k==='rocket'&&Math.random()<.6)G.parts.push({x:b.x,y:b.y,vx:(Math.random()-.5)*30,vy:(Math.random()-.5)*30,l:.5,m:.5,c:'#999',s:4});
+const steps=Math.ceil(Math.hypot(b.vx,b.vy)*dt/3);for(let s=0;s<steps&&!b.dead;s++){const sx=b.vx*dt/steps,sy=b.vy*dt/steps;let hitT=null;
+if(solidAt(b.x+sx,b.y)){hitT=[b.x+sx,b.y];b.vx=-b.vx}else if(solidAt(b.x,b.y+sy)){hitT=[b.x,b.y+sy];b.vy=-b.vy}else if(solidAt(b.x+sx,b.y+sy)){hitT=[b.x+sx,b.y+sy];b.vx=-b.vx;b.vy=-b.vy}
+if(hitT){const c=tileAt(hitT[0],hitT[1]);if(c==='O'){const i=Math.floor(hitT[0]/T),j=Math.floor(hitT[1]/T);grid[j][i]='.';b.dead=1;explode(i*T+T/2,j*T+T/2,80,2);break}
+b.b++;if(b.own==='p')G.stats.bounces++;if(b.b>b.maxB){b.dead=1;if(b.k==='rocket'||b.k==='bomb')explode(b.x,b.y,b.k==='rocket'?50:64,b.dmg);else{snd(900,.04,'square',.02);for(let i=0;i<5;i++)G.parts.push({x:b.x,y:b.y,vx:(Math.random()-.5)*120,vy:(Math.random()-.5)*120,l:.2,m:.2,c:'#fff3b0',s:2})}break}
+snd(1200+Math.random()*300,.04,'square',.025,600);for(let i=0;i<4;i++)G.parts.push({x:b.x,y:b.y,vx:(Math.random()-.5)*140,vy:(Math.random()-.5)*140,l:.2,m:.2,c:'#fff3b0',s:2})}
+else{b.x+=sx;b.y+=sy}
+for(const t of [G.player,...G.enemies]){if(!t||t.hp<=0)continue;const isP=t.type==='P';if((b.own==='p'&&isP&&(b.b===0||b.safe>0))||(b.own==='e'&&!isP))continue;if(b.own==='p'&&isP)continue;
+if((t.x-b.x)**2+(t.y-b.y)**2<(t.r+b.r)**2){b.dead=1;if(b.k==='rocket'||b.k==='bomb')explode(b.x,b.y,b.k==='rocket'?50:64,b.dmg);if(b.k!=='bomb'||true)damage(t,b.k==='bomb'?0:b.dmg);break}}
+}
+if(!b.dead&&b.life<=0){b.dead=1;if(b.k==='bomb'||b.k==='rocket')explode(b.x,b.y,64,b.dmg)}}
+// bullet vs bullet cancel
+for(let i=0;i<G.bullets.length;i++){const a=G.bullets[i];if(a.dead)continue;for(let j=i+1;j<G.bullets.length;j++){const c=G.bullets[j];if(c.dead||a.own===c.own)continue;if((a.x-c.x)**2+(a.y-c.y)**2<64){a.dead=c.dead=1;debris(a.x,a.y,'#fff3b0')}}}
+G.bullets=G.bullets.filter(b=>!b.dead);
+for(const m of G.mines){if(m.dead)continue;m.ph+=dt;if(m.arm>0){m.arm-=dt;continue}m.fuse-=dt;let trig=m.fuse<=0;
+for(const t of [G.player,...G.enemies])if(t&&t.hp>0&&((m.own==='p')!==(t.type==='P'))&&Math.hypot(t.x-m.x,t.y-m.y)<26)trig=true;if(trig){m.dead=1;explode(m.x,m.y,70,2)}}
+G.mines=G.mines.filter(m=>!m.dead);G.enemies=G.enemies.filter(e=>e.hp>0||(e.dead=1,false));
+for(const q of G.parts){q.x+=q.vx*dt;q.y+=q.vy*dt;q.vx*=.92;q.vy*=.92;q.l-=dt}G.parts=G.parts.filter(q=>q.l>0);for(const k of G.tracks)k.l-=dt;G.tracks=G.tracks.filter(k=>k.l>0);for(const k of G.booms)k.t+=dt;G.booms=G.booms.filter(k=>k.t<.4);
+shake*=.88;flash=Math.max(0,flash-dt);
+if(G.endT<0){if(p.hp<=0){G.endT=1.2;G.result='lose'}else if(!G.enemies.length){G.endT=1;G.result='win'}}else{G.endT-=dt;if(G.endT<=0)endLevel(G.result)}
+hud()}
+function endLevel(r){mode='end';mouse.down=false;$('ovRes').classList.remove('hide');const s=G.stats;
+if(r==='win'){const last=lv===LEVELS.length-1;$('rT').textContent=last?'全部通关！':'第 '+(lv+1)+' 关胜利';$('rP').innerHTML=(last?'玩具坦克之王就是你！':'下一关：'+LEVELS[lv+1].name)+'<br>用时 '+G.time.toFixed(1)+' 秒 · 开火 '+s.shots+' 次 · 反弹 '+s.bounces+' 次 · 击毁 '+s.kills;$('bNext').classList.toggle('hide',last);$('bRetry').textContent=last?'从第 1 关再来':'重玩本关';snd(523,.15,'triangle',.08);setTimeout(()=>snd(784,.3,'triangle',.08),150)}
+else{$('rT').textContent='坦克被击毁';$('rP').innerHTML='第 '+(lv+1)+' 关：'+LEVELS[lv].name+'<br>提示：利用墙面反弹，从掩体后面打敌人更安全。';$('bNext').classList.add('hide');$('bRetry').textContent='重新开始';snd(300,.5,'sawtooth',.06,80)}}
+// ---------- draw
+const BRICK=['#e74c3c','#3498db','#f1c40f','#2ecc71','#ecf0f1','#e67e22'];
+function shade(c,f){const n=parseInt(c.slice(1),16);let r=n>>16,g=n>>8&255,b=n&255;const t=f<0?0:255,p=Math.abs(f);r=Math.round((t-r)*p+r);g=Math.round((t-g)*p+g);b=Math.round((t-b)*p+b);return'rgb('+r+','+g+','+b+')'}
+function drawPaper(){X.fillStyle='#f4ecd8';X.fillRect(0,0,W,H);X.strokeStyle='#a8c6e866';X.lineWidth=1;X.beginPath();for(let x=0;x<=W;x+=10){X.moveTo(x+.5,0);X.lineTo(x+.5,H)}for(let y=0;y<=H;y+=10){X.moveTo(0,y+.5);X.lineTo(W,y+.5)}X.stroke();X.strokeStyle='#7fa8d8aa';X.beginPath();for(let x=0;x<=W;x+=T){X.moveTo(x+.5,0);X.lineTo(x+.5,H)}for(let y=0;y<=H;y+=T){X.moveTo(0,y+.5);X.lineTo(W,y+.5)}X.stroke();
+for(const d of deco){X.fillStyle='#c9b48a22';X.beginPath();X.ellipse(d.x,d.y,d.r,d.r*.6,d.a,0,7);X.fill()}}
+function drawTile(i,j,c){const x=i*T,y=j*T;
+if(c==='M'){X.fillStyle='#8b6b43';X.beginPath();X.roundRect(x-1,y-1,T+2,T+2,8);X.fill();X.fillStyle='#6e5232';for(let k=0;k<3;k++){X.beginPath();X.arc(x+8+((i*7+j*13+k*11)%24),y+8+((i*5+j*3+k*17)%24),3+k,0,7);X.fill()}return}
+if(c==='#'){const col=BRICK[(i*3+j*5+((i*j)%3))%6];X.fillStyle='#0003';X.fillRect(x+4,y+5,T,T);X.fillStyle=shade(col,-.25);X.fillRect(x,y,T,T);X.fillStyle=col;X.fillRect(x+1,y+1,T-3,T-4);X.fillStyle=shade(col,.35);X.fillRect(x+1,y+1,T-3,3);
+for(const [sx,sy] of [[11,11],[29,11],[11,28],[29,28]]){X.fillStyle=shade(col,-.3);X.beginPath();X.arc(x+sx+1,y+sy+2,6,0,7);X.fill();X.fillStyle=shade(col,.1);X.beginPath();X.arc(x+sx,y+sy,6,0,7);X.fill();X.fillStyle=shade(col,.5);X.beginPath();X.arc(x+sx-2,y+sy-2,2,0,7);X.fill()}return}
+if(c==='B'){X.fillStyle='#0003';X.fillRect(x+5,y+6,T-4,T-4);X.fillStyle='#c89b5c';X.fillRect(x+2,y+2,T-4,T-4);X.fillStyle='#b5874a';X.fillRect(x+2,y+T/2-1,T-4,3);X.fillStyle='#e2c08a';X.fillRect(x+T/2-4,y+2,8,T-4);X.strokeStyle='#8a6332';X.lineWidth=1.5;X.strokeRect(x+2.5,y+2.5,T-5,T-5);return}
+if(c==='O'){const cx=x+T/2,cy=y+T/2;X.fillStyle='#0004';X.beginPath();X.arc(cx+3,cy+4,15,0,7);X.fill();X.fillStyle='#c0392b';X.beginPath();X.arc(cx,cy,15,0,7);X.fill();X.strokeStyle='#8e2a20';X.lineWidth=2;X.beginPath();X.arc(cx,cy,11,0,7);X.stroke();X.fillStyle='#f1c40f';X.font='bold 11px sans-serif';X.textAlign='center';X.textBaseline='middle';X.fillText('!',cx,cy+1);X.fillStyle='#fff6';X.beginPath();X.arc(cx-5,cy-6,4,0,7);X.fill()}}
+function drawBush(i,j){const x=i*T+T/2,y=j*T+T/2;X.fillStyle='#2e7d32';for(let k=0;k<5;k++){const a=k*1.256+i+j;X.beginPath();X.arc(x+Math.cos(a)*10,y+Math.sin(a)*10,13,0,7);X.fill()}X.fillStyle='#43a047';for(let k=0;k<4;k++){const a=k*1.57+j;X.beginPath();X.arc(x+Math.cos(a)*8-2,y+Math.sin(a)*8-3,9,0,7);X.fill()}X.fillStyle='#66bb6a88';X.beginPath();X.arc(x-5,y-6,5,0,7);X.fill()}
+function drawTank(t){const P=t.type==='P',col=P?'#4e8f3a':ETYPE[t.type].col;X.save();X.globalAlpha=t.alpha;X.translate(t.x,t.y);
+X.fillStyle='#0004';X.beginPath();X.roundRect(-15,-12,34,28,6);X.fill();
+X.rotate(t.a);X.fillStyle='#333';X.fillRect(-16,-15,32,7);X.fillRect(-16,8,32,7);X.fillStyle='#555';for(let k=-14;k<16;k+=5){X.fillRect(k,-15,2,7);X.fillRect(k,8,2,7)}
+X.fillStyle=t.hit>0?'#fff':shade(col,-.2);X.beginPath();X.roundRect(-14,-10,28,20,4);X.fill();X.fillStyle=t.hit>0?'#fff':col;X.beginPath();X.roundRect(-13,-9,26,16,4);X.fill();X.rotate(-t.a);
+X.rotate(t.ta);X.fillStyle='#0003';X.fillRect(2,-2,22,6);X.fillStyle=shade(col,-.35);X.fillRect(0,-3.5,22,7);X.fillStyle='#222';X.fillRect(19,-4,5,8);X.fillStyle=shade(col,.15);X.beginPath();X.arc(0,0,9,0,7);X.fill();X.fillStyle=shade(col,.45);X.beginPath();X.arc(-2,-3,3,0,7);X.fill();X.restore();
+if(t.type==='T'||(!P&&t.max>1)){X.fillStyle='#0006';X.fillRect(t.x-16,t.y-26,32,4);X.fillStyle='#e74c3c';X.fillRect(t.x-16,t.y-26,32*t.hp/t.max,4)}
+if(t.hit>0)t.hit-=1/60}
+function drawPreview(){const p=G.player;if(!p||p.hp<=0||mode!=='play')return;const w=WEPS[G.wep];const r=trace(p.x+Math.cos(p.ta)*22,p.y+Math.sin(p.ta)*22,p.ta,Math.min(2,w.b),760);X.save();X.setLineDash([7,7]);X.lineDashOffset=-G.time*30;X.lineWidth=2;
+for(let i=0;i<r.pts.length-1;i++){X.strokeStyle=i===0?'#e74c3ccc':i===1?'#e67e22aa':'#f1c40f88';X.beginPath();X.moveTo(r.pts[i][0],r.pts[i][1]);X.lineTo(r.pts[i+1][0],r.pts[i+1][1]);X.stroke();if(i>0){X.setLineDash([]);X.fillStyle='#fff';X.beginPath();X.arc(r.pts[i][0],r.pts[i][1],3,0,7);X.fill();X.setLineDash([7,7])}}X.restore();
+X.strokeStyle='#e74c3c';X.lineWidth=2;X.beginPath();X.arc(mouse.x,mouse.y,9,0,7);X.moveTo(mouse.x-14,mouse.y);X.lineTo(mouse.x+14,mouse.y);X.moveTo(mouse.x,mouse.y-14);X.lineTo(mouse.x,mouse.y+14);X.stroke()}
+function draw(){X.save();if(shake>.3)X.translate((Math.random()-.5)*shake,(Math.random()-.5)*shake);drawPaper();
+for(let j=0;j<CH;j++)for(let i=0;i<CW;i++)if(grid[j][i]==='M')drawTile(i,j,'M');
+for(const k of G.tracks){X.save();X.globalAlpha=Math.min(.35,k.l/6*.35);X.translate(k.x,k.y);X.rotate(k.a);X.fillStyle='#5a4a3a';X.fillRect(-2,-13,4,5);X.fillRect(-2,8,4,5);X.restore()}
+for(const k of G.packs)if(!k.used){X.fillStyle='#0003';X.fillRect(k.x-10,k.y-8,24,22);X.fillStyle='#fff';X.fillRect(k.x-12,k.y-12,24,22);X.fillStyle='#e53935';X.fillRect(k.x-3,k.y-9,6,16);X.fillRect(k.x-8,k.y-4,16,6)}
+for(const m of G.mines){const bl=m.arm>0||Math.sin(m.ph*8)>0;X.globalAlpha=m.own==='e'?.55:1;X.fillStyle='#333';X.beginPath();X.arc(m.x,m.y,8,0,7);X.fill();X.fillStyle=bl?(m.own==='p'?'#ffd65a':'#ff3b30'):'#600';X.beginPath();X.arc(m.x,m.y,3,0,7);X.fill();if(m.own==='p'&&m.fuse<4&&m.arm<=0){X.strokeStyle='#ffd65a';X.lineWidth=2;X.beginPath();X.arc(m.x,m.y,12,-1.57,-1.57+6.283*m.fuse/4);X.stroke()}X.globalAlpha=1}
+for(let j=0;j<CH;j++)for(let i=0;i<CW;i++){const c=grid[j][i];if(c==='#'||c==='B'||c==='O')drawTile(i,j,c)}
+for(const e of G.enemies)drawTank(e);if(G.player&&G.player.hp>0){const h=hidden(G.player);if(h)G.player.alpha=.55;else G.player.alpha=1;drawTank(G.player)}
+for(let j=0;j<CH;j++)for(let i=0;i<CW;i++)if(grid[j][i]==='G'){X.globalAlpha=G.player&&hidden(G.player)&&Math.hypot(i*T+20-G.player.x,j*T+20-G.player.y)<40?.55:.95;drawBush(i,j);X.globalAlpha=1}
+for(const b of G.bullets){const col=b.own==='p'?(b.k==='seek'?'#00bcd4':b.k==='bomb'?'#ff9800':b.k==='rocket'?'#9c27b0':'#ffb300'):'#e53935';for(let i=0;i<b.trail.length;i++){X.globalAlpha=i/b.trail.length*.6;X.fillStyle=col;X.beginPath();X.arc(b.trail[i][0],b.trail[i][1],b.r*i/b.trail.length,0,7);X.fill()}X.globalAlpha=1;X.fillStyle='#222';X.beginPath();X.arc(b.x,b.y,b.r+1.5,0,7);X.fill();X.fillStyle=col;X.beginPath();X.arc(b.x,b.y,b.r,0,7);X.fill()}
+for(const q of G.parts){X.globalAlpha=Math.max(0,q.l/q.m);X.fillStyle=q.c;if(q.sq)X.fillRect(q.x-q.s/2,q.y-q.s/2,q.s,q.s);else{X.beginPath();X.arc(q.x,q.y,q.s,0,7);X.fill()}}X.globalAlpha=1;
+for(const k of G.booms){X.globalAlpha=1-k.t/.4;X.fillStyle='#fff5c0';X.beginPath();X.arc(k.x,k.y,k.R*(.4+k.t*1.6),0,7);X.fill();X.strokeStyle='#ff9800';X.lineWidth=4;X.beginPath();X.arc(k.x,k.y,k.R*(.6+k.t*2),0,7);X.stroke()}X.globalAlpha=1;
+drawPreview();X.restore();if(flash>0){X.fillStyle='rgba(255,250,220,'+flash*.8+')';X.fillRect(0,0,W,H)}}
+// ---------- HUD
+function hud(){if(!G.player)return;$('hLv').textContent=lv+1;let h='';for(let i=0;i<G.player.max;i++)h+='<span class="hp'+(i<G.player.hp?'':' off')+'"></span>';if($('hHp').innerHTML!==h)$('hHp').innerHTML=h;$('hEn').textContent=G.enemies.length;$('hMn').textContent=G.mineCount;
+const wb=$('weps');if(!wb.children.length)WEPS.forEach((w,i)=>{const b=document.createElement('button');b.onclick=e=>{e.stopPropagation();setWep(i)};wb.appendChild(b)});
+WEPS.forEach((w,i)=>{const b=wb.children[i];const t=(i+1)+' '+w.n+' '+(w.ammo===Infinity?'∞':G.ammo[i]);if(b.textContent!==t)b.textContent=t;b.classList.toggle('on',G.wep===i);b.classList.toggle('cd',G.ammo[i]<=0)})}
+function setWep(i){if(G.ammo[i]<=0){showTip(WEPS[i].n+'没有弹药了',1.5);return}G.wep=i;snd(700,.05,'triangle',.05);hud()}
+// ---------- loop & input
+function loop(t){const dt=Math.min(.033,(t-lastT)/1000||0);lastT=t;if(mode==='play')update(dt);if(grid)draw();requestAnimationFrame(loop)}
+function resize(){const touch=document.body.classList.contains('touchon');const aw=innerWidth-12,ah=innerHeight-(touch?200:60);const s=Math.min(aw/W,ah/H,1.4);cv.style.width=W*s+'px';cv.style.height=H*s+'px';$('stage').style.width=W*s+'px'}
+function toCanvas(cx,cy){const r=cv.getBoundingClientRect();return{x:(cx-r.left)/r.width*W,y:(cy-r.top)/r.height*H}}
+addEventListener('keydown',e=>{keys[e.code]=true;if(mode==='play'){if(e.code==='Space'){playerMine();e.preventDefault()}if(/^Digit[1-4]$/.test(e.code))setWep(+e.code[5]-1)}if(e.code.startsWith('Arrow'))e.preventDefault();if(e.code==='Enter'&&mode!=='play'){(!$('bNext').classList.contains('hide')&&mode==='end'?$('bNext'):mode==='menu'?$('bStart'):$('bRetry')).click()}});
+addEventListener('keyup',e=>{keys[e.code]=false});
+cv.addEventListener('mousemove',e=>{Object.assign(mouse,toCanvas(e.clientX,e.clientY))});
+cv.addEventListener('mousedown',e=>{if(e.button===0){Object.assign(mouse,toCanvas(e.clientX,e.clientY));mouse.down=true;playerFire()}});
+addEventListener('mouseup',()=>{mouse.down=false});cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('touchstart',e=>{document.body.classList.add('touchon');const t=e.changedTouches[0];Object.assign(mouse,toCanvas(t.clientX,t.clientY));if(G.player)G.player.ta=Math.atan2(mouse.y-G.player.y,mouse.x-G.player.x);playerFire();e.preventDefault()},{passive:false});
+cv.addEventListener('touchmove',e=>{const t=e.changedTouches[0];Object.assign(mouse,toCanvas(t.clientX,t.clientY));e.preventDefault()},{passive:false});
+const joy={on:false,x:0,y:0,id:null};const jb=$('joy');
+function joyMove(t){const r=jb.getBoundingClientRect();let dx=t.clientX-(r.left+r.width/2),dy=t.clientY-(r.top+r.height/2);const l=Math.hypot(dx,dy),m=r.width/2-20;if(l>m){dx=dx/l*m;dy=dy/l*m}joy.x=dx/m;joy.y=dy/m;$('knob').style.transform='translate('+dx+'px,'+dy+'px)'}
+jb.addEventListener('touchstart',e=>{joy.on=true;joyMove(e.changedTouches[0]);e.preventDefault()},{passive:false});jb.addEventListener('touchmove',e=>{joyMove(e.changedTouches[0]);e.preventDefault()},{passive:false});
+jb.addEventListener('touchend',e=>{joy.on=false;joy.x=joy.y=0;$('knob').style.transform='';e.preventDefault()});
+const tb=(id,f)=>$(id).addEventListener('touchstart',e=>{f();e.preventDefault()},{passive:false});
+tb('tFire',()=>{mouse.down=true;playerFire()});$('tFire').addEventListener('touchend',()=>mouse.down=false);tb('tMine',playerMine);tb('tWep',()=>{for(let k=1;k<=4;k++){const i=(G.wep+k)%4;if(G.ammo[i]>0){setWep(i);break}}});
+$('tFire').onclick=()=>playerFire();$('tMine').onclick=playerMine;
+function start(n){load(n);mode='play';$('ovStart').classList.add('hide');$('ovRes').classList.add('hide');if(!AC)snd(440,.01,'sine',.001);if(G.player)mouse.x=G.player.x+200,mouse.y=G.player.y}
+$('bStart').onclick=()=>start(0);$('bNext').onclick=()=>start(lv+1);$('bRetry').onclick=()=>start(G.result==='win'&&lv===LEVELS.length-1?0:lv);
+if(matchMedia('(pointer:coarse)').matches||'ontouchstart' in window&&innerWidth<800)document.body.classList.add('touchon');
+addEventListener('resize',resize);resize();load(0);requestAnimationFrame(loop);
+window.__game={get G(){return G},get mode(){return mode},get lv(){return lv},start,load,trace,LEVELS,grid:()=>grid,killAll(){for(const e of G.enemies)damage(e,99)},toScreen(x,y){const r=cv.getBoundingClientRect();return{x:r.left+x/W*r.width,y:r.top+y/H*r.height}}};
+</script></body></html>
